@@ -78,36 +78,16 @@ class SymmetricResidualNet(nn.Module):
         # 4. Combine & Decode
         combined = torch.cat([local_feats, global_context_expanded], dim=2)
 
-        # 4. Predict Deviations (Softmax Replacement)
-        
-        # --- Constants for sharpness ---
-        # Temperature < 1.0 allows for extreme inequality (Rich get richer)
-        # Temperature > 1.0 forces equality
-        temp = 1
-        
-        # Safety floor: Ensure no one gets 0.0 (prevent infinite loss)
-        epsilon = 0
-
+        # 4. Predict Deviations
         # --- Bandwidth ---
-        # 1. Get raw scores (logits) from the head
-        # Squeeze converts [Batch, K, 1] -> [Batch, K]
         logits_b = self.head_b_delta(combined).squeeze(2)
-        
-        # 2. Apply Softmax with Temperature
-        # dividing by 0.2 makes the differences 5x bigger before softmax
-        raw_dist_b = F.softmax(logits_b / temp, dim=1)
-        
-        # 3. Apply Safety Floor (Mix 99% logic with 1% uniform)
-        safe_dist_b = (1 - epsilon) * raw_dist_b + (epsilon / self.K)
-        
-        # 4. Allocate
-        b_k = safe_dist_b * self.B_total
+        dist_b = F.softmax(logits_b, dim=1)
+        b_k = dist_b * self.B_total
 
         # --- Compute (Same Logic) ---
         logits_f = self.head_f_delta(combined).squeeze(2)
-        raw_dist_f = F.softmax(logits_f / temp, dim=1)
-        safe_dist_f = (1 - epsilon) * raw_dist_f + (epsilon / self.K)
-        f_dt_k = safe_dist_f * self.C_DT_total
+        dist_f = F.softmax(logits_f, dim=1)
+        f_dt_k = dist_f * self.C_DT_total
 
         # --- Compression (Keep Tanh) ---
         # Compression is an absolute value (1.0 to 3.0), not a shared resource.
