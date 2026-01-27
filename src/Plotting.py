@@ -33,7 +33,6 @@ def plot_result(t_comp, t_tr, t_dt):
     ax.set_xlabel('Sensor Index', fontsize=12)
     ax.set_xticks(x_pos)
     ax.set_xticklabels(sensor_labels) # Set labels to "Sensor 0", "Sensor 1"...
-    ax.set_ylim(0, 30) 
 
     # Grid behind bars
     ax.grid(axis='y', linestyle='-', alpha=0.3)
