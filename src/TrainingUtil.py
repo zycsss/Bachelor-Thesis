@@ -6,6 +6,7 @@ import math
 from torch import nn
 import pandas as pd
 from ProcessTime import t_total
+from IPython.core.display import display, Markdown
 
 
 def unsupervised_loss(X, b, f, beta):
@@ -122,4 +123,4 @@ def print_avg(X, b, f, beta):
 
     # 4. Create DataFrame and print
     df = pd.DataFrame(rows)
-    print(df.to_markdown(index=False, floatfmt=".4f"))
+    display(Markdown(df.to_markdown(index=False, floatfmt=".4f")))

@@ -83,10 +83,10 @@ class SymmetricResidualNet(nn.Module):
         # --- Constants for sharpness ---
         # Temperature < 1.0 allows for extreme inequality (Rich get richer)
         # Temperature > 1.0 forces equality
-        temp = 0.1  
+        temp = 1
         
         # Safety floor: Ensure no one gets 0.0 (prevent infinite loss)
-        epsilon = 0.01 
+        epsilon = 0
 
         # --- Bandwidth ---
         # 1. Get raw scores (logits) from the head
