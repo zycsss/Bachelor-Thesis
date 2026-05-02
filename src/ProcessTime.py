@@ -3,11 +3,12 @@ import torch
 import math
 
 
-def t_tr(X, b, f, beta, numpy=False):
+def t_tr(X, b, f, numpy=False):
     # Unpack
     K = b.shape[1]
     D_k = X[:, :K]
-    H_k_mag = X[:, K:]
+    H_k_mag = X[:, K:2*K]
+    beta = X[:, 2*K:]
 
     p_k = c.transmit_power
     N0 = c.N0
@@ -24,13 +25,15 @@ def t_tr(X, b, f, beta, numpy=False):
     return T_tr
     
 
-def t_comp(X, b, f, beta, numpy=False):
+def t_comp(X, b, f, numpy=False):
     # Unpack
     K = b.shape[1]
     D_k = X[:, :K]
+    beta = X[:, 2*K:]
 
     epsilon = c.compression_constant
     f_S = c.sensor_compression_speed
+    
 
     eta = torch.exp(beta * epsilon) - math.exp(epsilon)
     T_comp = (D_k * eta) / f_S
@@ -41,7 +44,7 @@ def t_comp(X, b, f, beta, numpy=False):
     return T_comp
 
 
-def t_dt(X, b, f, beta, numpy=False):
+def t_dt(X, b, f, numpy=False):
     # Unpack
     K = b.shape[1]
     D_k = X[:, :K]
@@ -55,8 +58,8 @@ def t_dt(X, b, f, beta, numpy=False):
     return T_DT
 
 
-def t_total(X, b, f, beta, numpy=False):
-    T_total = t_comp(X, b, f, beta) + t_tr(X, b, f, beta) + t_dt(X, b, f, beta)
+def t_total(X, b, f, numpy=False):
+    T_total = t_comp(X, b, f) + t_tr(X, b, f) + t_dt(X, b, f)
     
     if numpy:
         return T_total.cpu().detach().numpy()

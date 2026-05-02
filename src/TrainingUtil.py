@@ -1,32 +1,23 @@
 import torch
 import numpy as np
-from EarlyStopping import EarlyStopping
-import Constants as c
-import math
-from torch import nn
-import pandas as pd
 from ProcessTime import t_total
-from IPython.core.display import display, Markdown
 
 
-def unsupervised_loss(X, b, f, beta):
+def unsupervised_loss(X, b, f):
     
-    T_total = t_total(X, b, f, beta)
+    T_total = t_total(X, b, f)
 
     # --- NEW LOSS (LogSumExp) ---
     # This mathematically approximates max(T_total) smoothly.
     # 'alpha' controls sharpness. 
     # alpha=1.0 is soft. alpha=10.0 is very close to strict Max.
-    alpha = 5.0 
+    alpha = 10.0 
     
     # LSE = (1/alpha) * log( sum( exp(alpha * T) ) )
     # We apply it per batch item (dim=1)
     lse = (1/alpha) * torch.logsumexp(alpha * T_total, dim=1)
     
-    # Minimize the average of the maximums across the batch
-    loss = torch.mean(lse)
-    
-    return loss
+    return torch.mean(lse)
 
 
 def train_loop(
@@ -46,9 +37,9 @@ def train_loop(
         X = X[0].to(device)
         # 2. Forward Pass
         # The model predicts optimal Bandwidth, Compute, and Compression based on the scenario
-        b_pred, f_pred, beta_pred = model(X)  # Model takes |H_k|^2 as input
+        b_pred, f_pred = model(X)  # Model takes |H_k|^2 as input
         # 3. Physics Calculation for Loss
-        loss = loss_fn(X, b_pred, f_pred, beta_pred)
+        loss = loss_fn(X, b_pred, f_pred)
 
         # 5. Backward Pass
         loss.backward()
@@ -59,9 +50,34 @@ def train_loop(
     return np.mean(total_loss)
 
 
-def train(
+def test_loop(
     model,
     data_loader,
+    loss_fn,
+    device: str,
+):
+    model.to(device)
+    model.eval()
+    total_loss = []
+
+    for i, X in enumerate(data_loader):
+
+        X = X[0].to(device)
+        # 2. Forward Pass
+        # The model predicts optimal Bandwidth, Compute, and Compression based on the scenario
+        b_pred, f_pred = model(X)  # Model takes |H_k|^2 as input
+        # 3. Physics Calculation for Loss
+        loss = loss_fn(X, b_pred, f_pred)
+
+        total_loss.append(loss.item())
+
+    return np.mean(total_loss)
+
+
+def train(
+    model,
+    train_loader,
+    test_loader,
     optimizer,
     scheduler,
     early_stopper,
@@ -73,11 +89,12 @@ def train(
     loss_list = []
     print("start training")
     for i in range(n_epoch):
-        loss = train_loop(model, data_loader, optimizer, loss_fn, device)
-        loss_list.append(loss)
-        print(f"epoch: {i+1:02d}, avg loss: {loss}")
-        scheduler.step(loss)
-        should_stop, best_epoch = early_stopper(i, loss, model)
+        train_loss = train_loop(model, train_loader, optimizer, loss_fn, device)
+        test_loss = test_loop(model, test_loader, loss_fn, device)
+        loss_list.append(test_loss)
+        print(f"epoch: {i+1:02d}, avg loss: {test_loss}")
+        scheduler.step(train_loss)
+        should_stop, best_epoch = early_stopper(i, test_loss, model)
         if should_stop:
 
             break
@@ -85,42 +102,3 @@ def train(
     model.load_state_dict(torch.load(path_to_weight))
 
 
-def print_avg(X, b, f, beta):
-    # 1. Calculate the means (Move to CPU/Numpy)
-    #    Assumes shape is (N_sensors, ...) or just (N_sensors,)
-    b_mean = b.mean(0).cpu().detach().numpy()
-    f_mean = f.mean(0).cpu().detach().numpy()
-    beta_mean = beta.mean(0).cpu().detach().numpy()
-    time_mean = t_total(X, b, f, beta).mean(0).cpu().detach().numpy()
-
-    rows = []
-    
-    # 2. Handle single sensor vs multiple sensors
-    if b_mean.ndim == 0:
-        # Case: Single sensor (Scalar values)
-        count = 1
-    else:
-        # Case: Multiple sensors (Vector values)
-        count = len(b_mean)
-
-    # 3. Build the rows
-    for k in range(count):
-        # Helper to extract value safely: 
-        # If it's 0-dim (scalar), use .item(). If it's a vector, access index [k].
-        val_b = b_mean if b_mean.ndim == 0 else b_mean[k]
-        val_f = f_mean if f_mean.ndim == 0 else f_mean[k]
-        val_beta = beta_mean if beta_mean.ndim == 0 else beta_mean[k]
-        val_time = time_mean if time_mean.ndim == 0 else time_mean[k]
-
-        rows.append({
-            "sensor_num": k,
-            # wrap in str() if it's an array to fix ValueError
-            "b": val_b if np.isscalar(val_b) else str(val_b),
-            "f": val_f if np.isscalar(val_f) else str(val_f),
-            "beta": val_beta if np.isscalar(val_beta) else str(val_beta),
-            "time": val_time if np.isscalar(val_time) else str(val_time),
-        })
-
-    # 4. Create DataFrame and print
-    df = pd.DataFrame(rows)
-    display(Markdown(df.to_markdown(index=False, floatfmt=".4f")))

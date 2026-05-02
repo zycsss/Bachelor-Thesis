@@ -1,5 +1,5 @@
 import torch
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset, random_split
 import torch
 import math
 import Constants
@@ -25,6 +25,11 @@ def generate_D_k_distribution(length, K):
     raw = torch.rand(length, K)
     return raw / raw.sum(dim=1, keepdim=True)
 
+def generate_beta(length, K, beta_max):
+    # beta_min = 1.0
+    beta = torch.rand(length, K) * (beta_max - 1.0) + 1.0
+    return beta
+
 
 # def generate_data(D_k_length, H_k_length, K, total_data_bits):
 #     d_k = generate_D_k_distribution(D_k_length, K) * total_data_bits
@@ -34,19 +39,16 @@ def generate_D_k_distribution(length, K):
 #     return torch.cat((d_k_extended, H_k_extended), dim=1)
 
 
-def generate_data(length, K, total_data_bits):
+def generate_data(length, K, total_data_bits, beta_max):
     d_k = generate_D_k_distribution(length, K) * total_data_bits
     H_k = generate_channel_gains(length, K)
-    return torch.cat((d_k, H_k), dim=1)
+    beta = generate_beta(length, K, beta_max)
+    return torch.cat((d_k, H_k, beta), dim=1)
 
 
-def generate_data_loader(length, K, total_data_bits, batch_size):
-    loader = DataLoader(
-        TensorDataset(generate_data(length, K, total_data_bits)),
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=4,
-        pin_memory=True,
-        persistent_workers=True,
-    )
-    return loader
+def generate_data_loader(length, K, total_data_bits, beta_max, batch_size=64, train_size=0.7):
+    dataset = TensorDataset(generate_data(length, K, total_data_bits, beta_max))
+    train_dataset, test_dataset = random_split(dataset, [train_size, 1-train_size])
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    return train_loader, test_loader
