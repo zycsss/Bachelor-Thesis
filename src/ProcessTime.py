@@ -65,3 +65,11 @@ def t_total(X, b, f, numpy=False):
         return T_total.cpu().detach().numpy()
     
     return T_total
+
+def t_max_completion(X, b, f, numpy=False):
+    T_max_completion = t_total(X, b, f).max(1).values
+    
+    if numpy:
+        return T_max_completion.cpu().detach().numpy()
+    
+    return T_max_completion

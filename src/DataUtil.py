@@ -4,26 +4,32 @@ import torch
 import math
 import Constants
 
+
 def generate_channel_gains(length, K):
-    
+
     shape = (length, K)
-    
+
     theta_k = torch.randn(shape) * 2 * torch.pi
     real_part = torch.randn(shape) * Constants.sigma_k
     imag_part = torch.randn(shape) * Constants.sigma_k
     CN = torch.complex(real_part, imag_part)
     NLoS = math.sqrt(1 / (Constants.kappa + 1)) * CN
-    LoS = math.sqrt(Constants.kappa / (Constants.kappa + 1)) * Constants.sigma_k * torch.exp(1j * theta_k)
+    LoS = (
+        math.sqrt(Constants.kappa / (Constants.kappa + 1))
+        * Constants.sigma_k
+        * torch.exp(1j * theta_k)
+    )
     h_k = LoS + NLoS
-    H_k = math.sqrt(Constants.A0) * Constants.d_k ** (- Constants.alpha / 2) * h_k
+    H_k = math.sqrt(Constants.A0) * Constants.d_k ** (-Constants.alpha / 2) * h_k
     H_k = H_k
-    
+
     return torch.abs(H_k)
 
 
 def generate_D_k_distribution(length, K):
     raw = torch.rand(length, K)
     return raw / raw.sum(dim=1, keepdim=True)
+
 
 def generate_beta(length, K, beta_max):
     # beta_min = 1.0
@@ -46,9 +52,11 @@ def generate_data(length, K, total_data_bits, beta_max):
     return torch.cat((d_k, H_k, beta), dim=1)
 
 
-def generate_data_loader(length, K, total_data_bits, beta_max, batch_size=64, train_size=0.7):
+def generate_data_loader(
+    length, K, total_data_bits, beta_max, batch_size=64, train_size=0.7
+):
     dataset = TensorDataset(generate_data(length, K, total_data_bits, beta_max))
-    train_dataset, test_dataset = random_split(dataset, [train_size, 1-train_size])
+    train_dataset, test_dataset = random_split(dataset, [train_size, 1 - train_size])
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     return train_loader, test_loader

@@ -170,3 +170,60 @@ class TraditionalLeaderOptimizer(nn.Module):
             result["loss_history"] = loss_history
 
         return result
+
+
+class TraditionalLeaderModel(nn.Module):
+    """
+    Wrapper so the traditional solver works like a neural network model.
+
+    Usage:
+        model = TraditionalLeaderModel(K)
+        b, f = model(X)
+    """
+
+    def __init__(
+        self,
+        K,
+        B=None,
+        C_dt=None,
+        min_share=1e-4,
+        dtype=torch.float32,
+        device="cpu",
+        steps=1000,
+        lr=1e-2,
+        tau=None,
+        optimizer_type="adam",
+        verbose=False,
+    ):
+        super().__init__()
+
+        self.solver = TraditionalLeaderOptimizer(
+            K=K,
+            B=B,
+            C_dt=C_dt,
+            min_share=min_share,
+            dtype=dtype,
+            device=device,
+        )
+
+        self.steps = steps
+        self.lr = lr
+        self.tau = tau
+        self.optimizer_type = optimizer_type
+        self.verbose = verbose
+
+        # dummy parameter so next(model.parameters()).device works
+        self.dummy = nn.Parameter(torch.empty(0, device=device, dtype=dtype))
+
+    def forward(self, X):
+        result = self.solver.solve(
+            X,
+            steps=self.steps,
+            lr=self.lr,
+            tau=self.tau,
+            optimizer_type=self.optimizer_type,
+            verbose=self.verbose,
+            return_history=False,
+        )
+
+        return result["b"], result["f"]
