@@ -1,0 +1,4 @@
+- include p_k and f_s_k
+- make them finishing at the same time
+  - why it doesn’t
+- learn step length

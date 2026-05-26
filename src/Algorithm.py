@@ -73,16 +73,17 @@ class Algorithm:
 
         return value
 
-    def X(self):
+    def to_X(self):
         """
         Returns X with shape (N, 3K):
-        [D_1...D_K, H_1...H_K, beta_1...beta_K]
+        [D_1...D_K, H_1...H_K, beta_1...beta_K, comp_speed_1...comp_speed_k]
         """
         return np.concatenate(
             [
                 self.D,
                 self.H_mag,
                 self.beta(),
+                self.comp_speed
             ],
             axis=1,
         )
@@ -130,7 +131,7 @@ class Algorithm:
         return objective + lam[:, :, 0] * g1 + lam[:, :, 1] * g2
 
     def leader_optimization(self, model):
-        X = self.X()
+        X = self.to_X()
 
         device = next(model.parameters()).device
         X_tensor = torch.tensor(X, dtype=torch.float32, device=device)
@@ -179,7 +180,7 @@ class Algorithm:
         if device is None:
             device = "cpu"
 
-        X = torch.tensor(self.X(), dtype=torch.float32, device=device)
+        X = torch.tensor(self.to_X(), dtype=torch.float32, device=device)
         b = torch.tensor(self.b, dtype=torch.float32, device=device)
         f = torch.tensor(self.f, dtype=torch.float32, device=device)
 
@@ -238,7 +239,7 @@ class Algorithm:
         return pd.DataFrame(history)
 
     def to_df(self):
-        X = torch.tensor(self.X(), dtype=torch.float32)
+        X = torch.tensor(self.to_X(), dtype=torch.float32)
         b = torch.tensor(self.b, dtype=torch.float32)
         f = torch.tensor(self.f, dtype=torch.float32)
 
@@ -268,7 +269,7 @@ class Algorithm:
         display(Markdown(self.to_df().to_markdown(index=False, floatfmt=".4f")))
 
     def plot(self):
-        X = torch.tensor(self.X(), dtype=torch.float32)
+        X = torch.tensor(self.to_X(), dtype=torch.float32)
         b = torch.tensor(self.b, dtype=torch.float32)
         f = torch.tensor(self.f, dtype=torch.float32)
         plot_result(X, b, f)

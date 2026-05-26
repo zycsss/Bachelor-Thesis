@@ -4,58 +4,56 @@ import math
 
 
 def t_tr(X, b, f, numpy=False):
-    # Unpack
     K = b.shape[1]
     D_k = X[:, :K]
     H_k_mag = X[:, K:2*K]
-    beta = X[:, 2*K:]
+    beta = X[:, 2*K:3*K]
+
+    b = torch.clamp(b, min=1e-9)
+    beta = torch.clamp(beta, min=1.0)
 
     p_k = c.transmit_power
     N0 = c.N0
 
-    # Rate (Shannon)
     snr = (H_k_mag**2 * p_k) / (N0 * b + 1e-16)
-    r_k = b * torch.log2(1 + snr)
+    snr = torch.clamp(snr, min=0.0, max=1e30)
+
+    r_k = b * torch.log2(1.0 + snr)
+    r_k = torch.clamp(r_k, min=1e-12)
 
     T_tr = D_k / (beta * r_k)
-    
-    if numpy:
-        return T_tr.cpu().detach().numpy()
-    
-    return T_tr
+
+    return T_tr.cpu().detach().numpy() if numpy else T_tr
     
 
 def t_comp(X, b, f, numpy=False):
-    # Unpack
     K = b.shape[1]
     D_k = X[:, :K]
-    beta = X[:, 2*K:]
+    beta = X[:, 2*K:3*K]
+    f_S = X[:, 3*K:4*K]
+
+    beta = torch.clamp(beta, min=1.0, max=10.0)
+    f_S = torch.clamp(f_S, min=1e-9)
 
     epsilon = c.compression_constant
-    f_S = c.sensor_compression_speed
-    
 
-    eta = torch.exp(beta * epsilon) - math.exp(epsilon)
+    eta = torch.exp(torch.clamp(beta * epsilon, max=50.0)) - math.exp(epsilon)
+
     T_comp = (D_k * eta) / f_S
-    
-    if numpy:
-        return T_comp.cpu().detach().numpy()
-    
-    return T_comp
+
+    return T_comp.cpu().detach().numpy() if numpy else T_comp
 
 
 def t_dt(X, b, f, numpy=False):
-    # Unpack
     K = b.shape[1]
     D_k = X[:, :K]
     c_k = c.dt_compute_complexity
 
+    f = torch.clamp(f, min=1e-9)
+
     T_DT = (D_k * c_k) / f
-    
-    if numpy:
-        return T_DT.cpu().detach().numpy()
-    
-    return T_DT
+
+    return T_DT.cpu().detach().numpy() if numpy else T_DT
 
 
 def t_total(X, b, f, numpy=False):
