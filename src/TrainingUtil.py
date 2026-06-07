@@ -12,10 +12,6 @@ def unsupervised_loss(X, b, f):
 
     alpha = 5.0
     smooth_max_norm = (1 / alpha) * torch.logsumexp(alpha * T_norm, dim=1)
-
-    eq_penalty = torch.mean((T_norm - 1.0) ** 2, dim=1)
-
-    lambda_eq = 5.0
     
     loss_norm = smooth_max_norm
 

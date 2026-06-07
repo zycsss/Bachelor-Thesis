@@ -78,3 +78,60 @@ $$
 $$
 \boxed{O(K^{3.5}\log(1/\varepsilon))}.
 $$
+
+# NN Model
+
+## sensor net
+
+$$
+O(N \cdot K \cdot (dh + h^2))
+$$
+
+- $d$: input features
+- $h$: hidden feature size
+
+## Global pooling
+
+Operations:
+
+1. global_max
+2. global_mean
+3. global_std
+
+$$
+O(3 · N · K · h)
+$$
+
+## Context Net
+
+$$
+O(N · h^2)
+$$
+
+## Bandwidth Head
+
+#### MAC
+
+$$
+O(N · K · h)
+$$
+
+#### Softmax
+
+$$
+O(N\cdot K)
+$$
+
+## $A_k$ Computing
+
+$$
+O(N · K)
+$$
+
+## Bisection
+
+$$
+O(N · K · I)
+$$
+
+- $I$: iterations run in bisection

@@ -57,7 +57,7 @@ def to_np(x):
     return x.detach().cpu().numpy()
 
 
-def print_avg(X, b, f):
+def to_df(X, b, f):
     K = b.shape[1]
 
     data = {
@@ -68,14 +68,32 @@ def print_avg(X, b, f):
         "f": to_np(f.mean(0)),
         "beta": to_np(X[:, 2*K:3*K].mean(0)),
         "comp_speed": to_np(X[:, 3*K:4*K].mean(0)),
-        "p_k": None,
+        "tr_power": to_np(X[:, 4*K:5*K].mean(0)),
         r"$t_{total}$": to_np(t_total(X, b, f).mean(0)),
         r"$t_{comp}$": to_np(t_comp(X, b, f).mean(0)),
         r"$t_{tr}$": to_np(t_tr(X, b, f).mean(0)),
         r"$t_{dt}$": to_np(t_dt(X, b, f).mean(0)),
     }
+    return pd.DataFrame(data)
 
-    display(Markdown(pd.DataFrame(data).to_markdown(index=False, floatfmt=".4f")))
+def print_avg(X, b, f):
+    
+    fmt = {
+        "sensor_num": ".0f",
+        "D": ".2e",
+        "H(dB)": ".2f",
+        "b": ".3e",
+        "f": ".3e",
+        "beta": ".2f",
+        "comp_speed": ".2e",
+        "tr_power": ".2e",
+        r"$t_{total}$": ".2f",
+        r"$t_{comp}$": ".2f",
+        r"$t_{tr}$": ".2f",
+        r"$t_{dt}$": ".2f",
+    }
+    
+    display(Markdown(to_df(X, b, f).to_markdown(index=False, floatfmt=fmt.values())))
     
 def to_db(x):
     return np.log10(x)*10

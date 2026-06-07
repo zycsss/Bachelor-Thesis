@@ -8,14 +8,13 @@ def t_tr(X, b, f, numpy=False):
     D_k = X[:, :K]
     H_k_mag = X[:, K:2*K]
     beta = X[:, 2*K:3*K]
+    tr_power = X[:, 4*K:5*K]
 
     b = torch.clamp(b, min=1e-9)
     beta = torch.clamp(beta, min=1.0)
-
-    p_k = c.transmit_power
     N0 = c.N0
 
-    snr = (H_k_mag**2 * p_k) / (N0 * b + 1e-16)
+    snr = (H_k_mag**2 * tr_power) / (N0 * b + 1e-16)
     snr = torch.clamp(snr, min=0.0, max=1e30)
 
     r_k = b * torch.log2(1.0 + snr)

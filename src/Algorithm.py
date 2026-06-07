@@ -5,7 +5,10 @@ import Constants
 from numpy.typing import NDArray
 import ProcessTime
 from IPython.core.display import display, Markdown
-from AnalyzeUtil import plot_result, to_db
+import AnalyzeUtil
+import cvxpy as cp
+import numpy as np
+import Constants as c
 
 
 class Algorithm:
@@ -13,9 +16,9 @@ class Algorithm:
         self,
         D: NDArray,
         H_mag: NDArray,
+        comp_speed: NDArray,
+        tr_power: NDArray,
         beta_max=Constants.beta_max,
-        p=None,
-        comp_speed=None,
     ):
         self.D = self._as_2d(D)
         self.H_mag = self._as_2d(H_mag)
@@ -25,10 +28,10 @@ class Algorithm:
         if self.H_mag.shape != (self.N, self.K):
             raise ValueError("H_mag must have the same shape as D")
 
-        self.p = self._init_param(
-            p,
+        self.tr_power = self._init_param(
+            tr_power,
             default_value=Constants.transmit_power,
-            name="p",
+            name="tr_power",
         )
 
         self.comp_speed = self._init_param(
@@ -83,7 +86,8 @@ class Algorithm:
                 self.D,
                 self.H_mag,
                 self.beta(),
-                self.comp_speed
+                self.comp_speed,
+                self.tr_power
             ],
             axis=1,
         )
@@ -97,13 +101,13 @@ class Algorithm:
         lam_sum = lam[:, :, 0] + lam[:, :, 1]
 
         beta_values = (1 / epsilon) * np.log(
-            (self.comp_speed / (epsilon * self.D)) * lam_sum
+            (self.comp_speed / (epsilon * (self.D + 1e-12))) * lam_sum
         )
 
         return np.clip(beta_values, 1, self.beta_max)
 
     def r(self):
-        return self.b * np.log2(1 + (self.H_mag**2 * self.p) / (Constants.N0 * self.b))
+        return self.b * np.log2(1 + (self.H_mag**2 * self.tr_power) / (Constants.N0 * self.b))
 
     def mu(self):
         return self.mu_from_lam(self.lam)
@@ -131,15 +135,70 @@ class Algorithm:
         return objective + lam[:, :, 0] * g1 + lam[:, :, 1] * g2
 
     def leader_optimization(self, model):
+        
+        if model is None:
+            self.leader_optimization_cvx()
+            return
+        
         X = self.to_X()
 
         device = next(model.parameters()).device
         X_tensor = torch.tensor(X, dtype=torch.float32, device=device)
 
+        model.eval()
+        
         b, f = model(X_tensor)
 
         self.b = b.detach().cpu().numpy().reshape(self.N, self.K)
         self.f = f.detach().cpu().numpy().reshape(self.N, self.K)
+        
+        
+    def leader_optimization_cvx(self, verbose=False):
+        beta = self.beta()
+
+        D = self.D
+        H = self.H_mag
+        p = self.tr_power
+        comp_speed = self.comp_speed
+
+        g = (H ** 2) * p / c.N0
+
+        eta = np.exp(beta * c.compression_constant) - np.exp(c.compression_constant)
+        T_comp = D * eta / comp_speed
+
+        T_DT = cp.Variable((self.N, self.K), nonneg=True)
+        T_tr = cp.Variable((self.N, self.K), nonneg=True)
+        T = cp.Variable(self.N, nonneg=True)
+
+        b = cp.Variable((self.N, self.K), nonneg=True)
+        f = cp.Variable((self.N, self.K), nonneg=True)
+
+        rate = -cp.rel_entr(b, b + g) / np.log(2)
+
+        constraints = [
+            cp.sum(b, axis=1) <= c.total_bandwidth,
+            cp.sum(f, axis=1) <= c.total_compute_speed,
+
+            f >= cp.multiply(c.dt_compute_complexity * D, cp.inv_pos(T_DT)),
+
+            rate >= cp.multiply(D, cp.inv_pos(cp.multiply(beta, T_tr))),
+
+            T[:, None] >= T_DT + T_tr + T_comp,
+        ]
+
+        problem = cp.Problem(cp.Minimize(cp.sum(T)), constraints)
+
+        problem.solve(
+            solver=cp.MOSEK,
+            verbose=verbose,
+        )
+
+        if problem.status not in ["optimal", "optimal_inaccurate"]:
+            raise RuntimeError(f"Leader optimization failed: {problem.status}")
+
+        self.b = np.asarray(b.value)
+        self.f = np.asarray(f.value)
+    
 
     def follower_optimization(
         self,
@@ -210,7 +269,7 @@ class Algorithm:
             self.follower_optimization(num_iters=follower_iters)
 
             # 3. Compute current DT synchronization time
-            device = next(model.parameters()).device
+            device = next(model.parameters()).device if model is not None else 'cpu'
             max_time = self.max_completion_time(device=device)
 
             # Average over samples/scenarios
@@ -242,34 +301,16 @@ class Algorithm:
         X = torch.tensor(self.to_X(), dtype=torch.float32)
         b = torch.tensor(self.b, dtype=torch.float32)
         f = torch.tensor(self.f, dtype=torch.float32)
+        return AnalyzeUtil.to_df(X, b, f)
 
-        beta = self.beta()
-
-        return pd.DataFrame(
-            {
-                "D": np.mean(self.D, axis=0),
-                "H_mag(dB)": to_db(np.mean(self.H_mag, axis=0)),
-                "p": np.mean(self.p, axis=0),
-                "comp_speed": np.mean(self.comp_speed, axis=0),
-                "b": np.mean(self.b, axis=0),
-                "f": np.mean(self.f, axis=0),
-                "beta": np.mean(beta, axis=0),
-                "lambda_1": np.mean(self.lam[:, :, 0], axis=0),
-                "lambda_2": np.mean(self.lam[:, :, 1], axis=0),
-                r"$t_{total}$": np.mean(
-                    ProcessTime.t_total(X, b, f, numpy=True), axis=0
-                ),
-                r"$t_{comp}$": np.mean(ProcessTime.t_comp(X, b, f, numpy=True), axis=0),
-                r"$t_{tr}$": np.mean(ProcessTime.t_tr(X, b, f, numpy=True), axis=0),
-                r"$t_{dt}$": np.mean(ProcessTime.t_dt(X, b, f, numpy=True), axis=0),
-            }
-        )
-
-    def display_df(self):
-        display(Markdown(self.to_df().to_markdown(index=False, floatfmt=".4f")))
+    def print_avg(self):
+        X = torch.tensor(self.to_X(), dtype=torch.float32)
+        b = torch.tensor(self.b, dtype=torch.float32)
+        f = torch.tensor(self.f, dtype=torch.float32)
+        AnalyzeUtil.print_avg(X, b, f)
 
     def plot(self):
         X = torch.tensor(self.to_X(), dtype=torch.float32)
         b = torch.tensor(self.b, dtype=torch.float32)
         f = torch.tensor(self.f, dtype=torch.float32)
-        plot_result(X, b, f)
+        AnalyzeUtil.plot_result(X, b, f)
