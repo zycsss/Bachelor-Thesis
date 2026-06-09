@@ -16,3 +16,4 @@ kappa = 10
 A0 = 10 ** (-30/10)
 alpha = 2
 exp_epsilon = math.exp(compression_constant)
+D_avg = 4e3

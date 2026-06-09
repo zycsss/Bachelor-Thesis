@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 import torch
-import Constants
 from numpy.typing import NDArray
 import ProcessTime
 from IPython.core.display import display, Markdown
@@ -9,6 +8,12 @@ import AnalyzeUtil
 import cvxpy as cp
 import numpy as np
 import Constants as c
+from DataUtil import generate_data_loader
+from TrainingUtil import unsupervised_loss, train
+from torch.optim import Adam, lr_scheduler
+from EarlyStopping import EarlyStopping
+from NNSolver import Net
+
 
 
 class Algorithm:
@@ -18,7 +23,7 @@ class Algorithm:
         H_mag: NDArray,
         comp_speed: NDArray,
         tr_power: NDArray,
-        beta_max=Constants.beta_max,
+        beta_max=c.beta_max,
     ):
         self.D = self._as_2d(D)
         self.H_mag = self._as_2d(H_mag)
@@ -30,13 +35,13 @@ class Algorithm:
 
         self.tr_power = self._init_param(
             tr_power,
-            default_value=Constants.transmit_power,
+            default_value=c.transmit_power,
             name="tr_power",
         )
 
         self.comp_speed = self._init_param(
             comp_speed,
-            default_value=Constants.sensor_compression_speed,
+            default_value=c.sensor_compression_speed,
             name="comp_speed",
         )
 
@@ -50,6 +55,13 @@ class Algorithm:
         # lam[:, :, 0] = lambda_1
         # lam[:, :, 1] = lambda_2
         self.lam = np.full((self.N, self.K, 2), 0.1, dtype=float)
+        
+        if torch.backends.mps.is_available():
+            self.device = 'mps'
+        elif torch.cuda.is_available():
+            self.device = 'cuda'
+        else:
+            self.device = 'cpu'
 
     def _as_2d(self, x):
         x = np.asarray(x, dtype=float)
@@ -75,6 +87,25 @@ class Algorithm:
             raise ValueError(f"{name} must have shape (K,) or (N, K)")
 
         return value
+    
+    def train_new_model(self):
+        
+        train_loader, test_loader = generate_data_loader(
+            int(1e5), 
+            self.K, self.K * 4e3, 
+            comp_speed_range=[c.sensor_compression_speed/2, c.sensor_compression_speed*2], 
+            tr_power_range=[c.transmit_power/2, c.transmit_power*2],
+            beta_max=self.beta_max
+            )
+        
+        model = Net(self.K, c.total_bandwidth, c.total_compute_speed, self.beta_max)
+
+        optimizer = Adam(model.parameters(), lr=0.01)
+        scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=1e-2, patience=3)
+        early_stopper = EarlyStopping(patience=5, min_delta=0.1)
+        loss_fn = unsupervised_loss
+
+        train(model, train_loader, test_loader, optimizer, scheduler, early_stopper, loss_fn, self.device, n_epoch=100)
 
     def to_X(self):
         """
@@ -96,7 +127,7 @@ class Algorithm:
         return self.beta_from_lam(self.lam)
 
     def beta_from_lam(self, lam):
-        epsilon = Constants.compression_constant
+        epsilon = c.compression_constant
 
         lam_sum = lam[:, :, 0] + lam[:, :, 1]
 
@@ -107,7 +138,7 @@ class Algorithm:
         return np.clip(beta_values, 1, self.beta_max)
 
     def r(self):
-        return self.b * np.log2(1 + (self.H_mag**2 * self.tr_power) / (Constants.N0 * self.b))
+        return self.b * np.log2(1 + (self.H_mag**2 * self.tr_power) / (c.N0 * self.b))
 
     def mu(self):
         return self.mu_from_lam(self.lam)
@@ -119,7 +150,7 @@ class Algorithm:
         return np.sqrt(lam2 * r / self.D)
 
     def dual_values(self, lam):
-        epsilon = Constants.compression_constant
+        epsilon = c.compression_constant
 
         beta = self.beta_from_lam(lam)
         mu = self.mu_from_lam(lam)
@@ -139,6 +170,8 @@ class Algorithm:
         if model is None:
             self.leader_optimization_cvx()
             return
+        elif model == 'new':
+            model = self.model
         
         X = self.to_X()
 
@@ -255,7 +288,6 @@ class Algorithm:
         max_iters=30,
         tol=1e-6,
         follower_iters=20,
-        verbose=True,
     ):
         history = []
 
