@@ -62,6 +62,8 @@ class Algorithm:
             self.device = 'cuda'
         else:
             self.device = 'cpu'
+            
+        self.time_used = 0
 
 
     def _as_2d(self, x):
@@ -356,3 +358,8 @@ class Algorithm:
     def plot(self):
         X, b, f = self.get_X_b_f()
         AnalyzeUtil.plot_result(X, b, f)
+        
+    def get_time_used(self):
+        if self.time_used == 0:
+            raise RuntimeError('The optimization is not performed yet')
+        return self.time_used
