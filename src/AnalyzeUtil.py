@@ -3,7 +3,7 @@ import numpy as np
 import ProcessTime as process
 import pandas as pd
 from ProcessTime import t_total, t_comp, t_tr, t_dt
-from IPython.core.display import display, Markdown
+import IPython.display
 
 
 def _plot_result(t_comp, t_tr, t_dt):
@@ -93,7 +93,7 @@ def print_avg(X, b, f):
         r"$t_{dt}$": ".2f",
     }
     
-    display(Markdown(to_df(X, b, f).to_markdown(index=False, floatfmt=fmt.values())))
+    IPython.display.display(IPython.display.Markdown(to_df(X, b, f).to_markdown(index=False, floatfmt=fmt.values())))
     
 def to_db(x):
     return np.log10(x)*10

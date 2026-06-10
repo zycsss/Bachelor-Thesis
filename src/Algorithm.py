@@ -3,7 +3,6 @@ import pandas as pd
 import torch
 from numpy.typing import NDArray
 import ProcessTime
-from IPython.core.display import display, Markdown
 import AnalyzeUtil
 import cvxpy as cp
 import numpy as np
@@ -13,6 +12,7 @@ from TrainingUtil import unsupervised_loss, train
 from torch.optim import Adam, lr_scheduler
 from EarlyStopping import EarlyStopping
 from NNSolver import Net
+import time
 
 
 
@@ -63,6 +63,7 @@ class Algorithm:
         else:
             self.device = 'cpu'
 
+
     def _as_2d(self, x):
         x = np.asarray(x, dtype=float)
 
@@ -97,15 +98,17 @@ class Algorithm:
             tr_power_range=[c.transmit_power/2, c.transmit_power*2],
             beta_max=self.beta_max
             )
-        
-        model = Net(self.K, c.total_bandwidth, c.total_compute_speed, self.beta_max)
 
+        model = Net(self.K, c.total_bandwidth, c.total_compute_speed, self.beta_max)
+        
         optimizer = Adam(model.parameters(), lr=0.01)
         scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=1e-2, patience=3)
         early_stopper = EarlyStopping(patience=5, min_delta=0.1)
         loss_fn = unsupervised_loss
 
         train(model, train_loader, test_loader, optimizer, scheduler, early_stopper, loss_fn, self.device, n_epoch=100)
+        
+        return model
 
     def to_X(self):
         """
@@ -167,11 +170,12 @@ class Algorithm:
 
     def leader_optimization(self, model):
         
-        if model is None:
+        if model == 'cvx':
             self.leader_optimization_cvx()
             return
         elif model == 'new':
-            model = self.model
+            model = self.train_new_model()
+            return
         
         X = self.to_X()
 
@@ -292,6 +296,8 @@ class Algorithm:
         history = []
 
         prev_obj = None
+        
+        start = time.perf_counter()
 
         for it in range(max_iters):
             # 1. Leader optimization: update self.b and self.f
@@ -326,23 +332,27 @@ class Algorithm:
                 break
 
             prev_obj = obj
-
+        
+        end = time.perf_counter()
+        
+        self.time_used = end - start
+        
         return pd.DataFrame(history)
-
-    def to_df(self):
+    
+    def get_X_b_f(self):
         X = torch.tensor(self.to_X(), dtype=torch.float32)
         b = torch.tensor(self.b, dtype=torch.float32)
         f = torch.tensor(self.f, dtype=torch.float32)
+        return X,b,f
+
+    def to_df(self):
+        X, b, f = self.get_X_b_f()
         return AnalyzeUtil.to_df(X, b, f)
 
     def print_avg(self):
-        X = torch.tensor(self.to_X(), dtype=torch.float32)
-        b = torch.tensor(self.b, dtype=torch.float32)
-        f = torch.tensor(self.f, dtype=torch.float32)
+        X, b, f = self.get_X_b_f()
         AnalyzeUtil.print_avg(X, b, f)
 
     def plot(self):
-        X = torch.tensor(self.to_X(), dtype=torch.float32)
-        b = torch.tensor(self.b, dtype=torch.float32)
-        f = torch.tensor(self.f, dtype=torch.float32)
+        X, b, f = self.get_X_b_f()
         AnalyzeUtil.plot_result(X, b, f)
