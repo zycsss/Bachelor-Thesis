@@ -108,7 +108,7 @@ class Algorithm:
         early_stopper = EarlyStopping(patience=5, min_delta=0.1)
         loss_fn = unsupervised_loss
 
-        train(model, train_loader, test_loader, optimizer, scheduler, early_stopper, loss_fn, self.device, n_epoch=100)
+        train(model, train_loader, test_loader, optimizer, scheduler, early_stopper, loss_fn, self.device, n_epoch=100, print_losses=True)
         
         return model
 
@@ -309,8 +309,8 @@ class Algorithm:
             self.follower_optimization(num_iters=follower_iters)
 
             # 3. Compute current DT synchronization time
-            device = next(model.parameters()).device if model is not None else 'cpu'
-            max_time = self.max_completion_time(device=device)
+            
+            max_time = self.max_completion_time(device=self.device)
 
             # Average over samples/scenarios
             obj = np.mean(max_time)
@@ -340,23 +340,17 @@ class Algorithm:
         self.time_used = end - start
         
         return pd.DataFrame(history)
-    
-    def get_X_b_f(self):
-        X = torch.tensor(self.to_X(), dtype=torch.float32)
-        b = torch.tensor(self.b, dtype=torch.float32)
-        f = torch.tensor(self.f, dtype=torch.float32)
-        return X,b,f
 
     def to_df(self):
-        X, b, f = self.get_X_b_f()
+        X, b, f = self._torch_state()
         return AnalyzeUtil.to_df(X, b, f)
 
     def print_avg(self):
-        X, b, f = self.get_X_b_f()
+        X, b, f = self._torch_state()
         AnalyzeUtil.print_avg(X, b, f)
 
     def plot(self):
-        X, b, f = self.get_X_b_f()
+        X, b, f = self._torch_state()
         AnalyzeUtil.plot_result(X, b, f)
         
     def get_time_used(self):

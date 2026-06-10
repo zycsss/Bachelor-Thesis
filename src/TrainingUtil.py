@@ -95,6 +95,7 @@ def train(
     device: str,
     n_epoch=30,
     path_to_weight="model/checkpoint.pth",
+    print_losses = True
 ):
     loss_list = []
     print("start training")
@@ -102,7 +103,8 @@ def train(
         train_loss = train_loop(model, train_loader, optimizer, loss_fn, device)
         test_loss = test_loop(model, test_loader, loss_fn, device)
         loss_list.append(test_loss)
-        print(f"epoch: {i+1:02d}, avg loss: {test_loss}")
+        if print_losses:
+            print(f"epoch: {i+1:02d}, avg loss: {test_loss}")
         scheduler.step(train_loss)
         should_stop, best_epoch = early_stopper(i, test_loss, model)
         if should_stop:
