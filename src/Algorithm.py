@@ -175,9 +175,6 @@ class Algorithm:
         if model == 'cvx':
             self.leader_optimization_cvx()
             return
-        elif model == 'new':
-            model = self.train_new_model()
-            return
         
         X = self.to_X()
 
@@ -298,6 +295,9 @@ class Algorithm:
         history = []
 
         prev_obj = None
+        
+        if model == 'new':
+            model = self.train_new_model()
         
         start = time.perf_counter()
 
