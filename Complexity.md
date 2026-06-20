@@ -84,7 +84,7 @@ $$
 ## sensor net
 
 $$
-O(N \cdot K \cdot (dh + h^2))
+O(K \cdot (dh + h^2))
 $$
 
 - $d$: input features
@@ -99,13 +99,13 @@ Operations:
 3. global_std
 
 $$
-O(3 · N · K · h)
+O(3 K · h)
 $$
 
 ## Context Net
 
 $$
-O(N · h^2)
+O(h^2)
 $$
 
 ## Bandwidth Head
@@ -113,25 +113,26 @@ $$
 #### MAC
 
 $$
-O(N · K · h)
+O( K · h)
 $$
 
 #### Softmax
 
 $$
-O(N\cdot K)
+O(K)
 $$
 
 ## $A_k$ Computing
 
 $$
-O(N · K)
+O(K)
 $$
 
 ## Bisection
 
 $$
-O(N · K · I)
+O(K · I)
 $$
 
 - $I$: iterations run in bisection
+

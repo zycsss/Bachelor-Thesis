@@ -73,13 +73,22 @@ class Net(nn.Module):
 
         combined = torch.cat([local_feats, global_context], dim=2)
 
-        logits_b = self.head_b_delta(combined).squeeze(2)
+        learned_delta = self.head_b_delta(combined).squeeze(2)
+        base_logits = initial_bandwidth_logits(
+            D_k=D_k,
+            H_k_mag=H_k_mag,
+            beta=beta,
+            tr_power=tr_power,
+            B_total=self.B_total,
+        )
+
+        logits_b = base_logits + learned_delta
 
         b_k = softmax_with_floor_and_temp(
             logits_b,
             self.B_total,
-            min_share=1e-2,
-            temp=0.1,
+            min_share=1e-5,
+            temp=1.0,
         )
 
         A = ProcessTime.t_comp(x, b_k, None) + ProcessTime.t_tr(x, b_k, None)
@@ -93,7 +102,32 @@ class Net(nn.Module):
         return b_k, f_dt_k
 
 
-def allocate_f_from_A(A, D_k, C_DT_total, num_iter=50):
+def initial_bandwidth_logits(D_k, H_k_mag, beta, tr_power, B_total):
+    K = D_k.shape[1]
+
+    equal_b = torch.as_tensor(
+        B_total / K,
+        dtype=D_k.dtype,
+        device=D_k.device,
+    )
+
+    beta = torch.clamp(beta, min=1.0)
+    snr_equal = (H_k_mag**2 * tr_power) / (c.N0 * equal_b + 1e-16)
+    snr_equal = torch.clamp(snr_equal, min=0.0, max=1e30)
+
+    rate_equal = equal_b * torch.log2(1.0 + snr_equal)
+    rate_equal = torch.clamp(rate_equal, min=1e-12)
+
+    transmission_need = D_k / (beta * rate_equal)
+    logits = torch.log(torch.clamp(transmission_need, min=1e-12))
+
+    logits_mean = torch.mean(logits, dim=1, keepdim=True)
+    logits_std = torch.std(logits, dim=1, keepdim=True)
+
+    return (logits - logits_mean) / (logits_std + 1e-6)
+
+
+def allocate_f_from_A(A, D_k, C_DT_total, num_iter=20):
     w = D_k * c.dt_compute_complexity
 
     low = torch.max(A, dim=1, keepdim=True).values + 1e-6
@@ -119,8 +153,11 @@ def allocate_f_from_A(A, D_k, C_DT_total, num_iter=50):
     return f
 
 
-def softmax_with_floor_and_temp(logits, total_budget, min_share=1e-6, temp=0.05):
+def softmax_with_floor_and_temp(logits, total_budget, min_share=1e-6, temp=0.1):
     K = logits.shape[1]
+
+    # Make sure the floor is valid for any K
+    min_share = min(min_share, 0.1 / K)
 
     logits = torch.clamp(logits, -30.0, 30.0)
     raw = torch.softmax(logits / temp, dim=1)

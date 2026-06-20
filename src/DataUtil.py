@@ -27,7 +27,8 @@ def generate_channel_gains(length, K):
 
 
 def generate_D_k_distribution(length, K):
-    raw = torch.rand(length, K)
+    range = [1e-3, 1]
+    raw = torch.rand(length, K) * (range[1] - range[0]) + range[0]
     return raw / raw.sum(dim=1, keepdim=True)
 
 
@@ -55,10 +56,10 @@ def generate_data(length, K, total_data_bits, beta_max, comp_speed_range, tr_pow
 
 
 def generate_data_loader(
-    length, K, total_data_bits, beta_max, comp_speed_range, tr_power_range, batch_size=64, train_size=0.7
+    length, K, total_data_bits, beta_max, comp_speed_range, tr_power_range, batch_size=8192, train_size=0.7
 ):
     dataset = TensorDataset(generate_data(length, K, total_data_bits, beta_max, comp_speed_range, tr_power_range))
     train_dataset, test_dataset = random_split(dataset, [train_size, 1 - train_size])
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, pin_memory=torch.cuda.is_available(), num_workers=0,)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, pin_memory=torch.cuda.is_available(), num_workers=0,)
     return train_loader, test_loader

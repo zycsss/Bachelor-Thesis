@@ -8,7 +8,7 @@ import IPython.display
 
 def _plot_result(t_comp, t_tr, t_dt):
     num_sensors = t_comp.shape[0]
-    sensor_labels = [f'Sensor {k}' for k in range(num_sensors)]
+    sensor_labels = np.arange(num_sensors)
 
     
     # 2. Setup Plot

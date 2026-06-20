@@ -7,7 +7,9 @@ class CVXSolver:
     def __init__(self, K, B_total=None, C_DT_total=None, beta_max=None):
         self.K = K
         self.B_total = B_total if B_total is not None else c.total_bandwidth
-        self.C_DT_total = C_DT_total if C_DT_total is not None else c.total_compute_speed
+        self.C_DT_total = (
+            C_DT_total if C_DT_total is not None else c.total_compute_power
+        )
         self.beta_max = beta_max if beta_max is not None else c.beta_max
 
     def solve(self, X, verbose=False):
@@ -17,12 +19,12 @@ class CVXSolver:
         K = self.K
 
         D = X[:, :K]
-        H = X[:, K:2 * K]
-        beta = X[:, 2 * K:3 * K]
-        comp_speed = X[:, 3 * K:4 * K]
-        tr_power = X[:, 4 * K:5 * K]
+        H = X[:, K : 2 * K]
+        beta = X[:, 2 * K : 3 * K]
+        comp_speed = X[:, 3 * K : 4 * K]
+        tr_power = X[:, 4 * K : 5 * K]
 
-        g = (H ** 2) * tr_power / c.N0
+        g = (H**2) * tr_power / c.N0
 
         eta = np.exp(beta * c.compression_constant) - np.exp(c.compression_constant)
         T_comp = D * eta / comp_speed
