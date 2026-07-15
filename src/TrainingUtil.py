@@ -78,7 +78,6 @@ def train(
     loss_fn,
     device: str,
     n_epoch=30,
-    path_to_weight="model/checkpoint.pth",
     print_losses = True
 ):
     loss_list = []
@@ -89,13 +88,13 @@ def train(
         loss_list.append(test_loss)
         if print_losses:
             print(f"epoch: {i+1:02d}, avg loss: {test_loss}")
-        scheduler.step(train_loss)
+        scheduler.step()
         should_stop, best_epoch = early_stopper(i, test_loss, model)
         if should_stop:
 
             break
     print(f"best epoch: {best_epoch+1:02d}, best avg loss: {loss_list[best_epoch]:>2f}")
-    model.load_state_dict(torch.load(path_to_weight, map_location=device))
+    early_stopper.restore_best_model(model)
 
 
 def set_seed(seed=42):

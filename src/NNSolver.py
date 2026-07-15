@@ -6,12 +6,13 @@ import ProcessTime
 
 
 class Net(nn.Module):
-    def __init__(self, K, B_total, C_DT_total, beta_max):
+    def __init__(self, K, B_total, C_DT_total, beta_max, uniform_f_dt=False):
         super().__init__()
         self.K = K
         self.B_total = B_total
         self.C_DT_total = C_DT_total
         self.beta_max = beta_max
+        self.uniform_f_dt = uniform_f_dt
 
         n_feat = 64
         combined_feat = n_feat * 2
@@ -30,7 +31,10 @@ class Net(nn.Module):
 
         self.head_b_delta = nn.Linear(combined_feat, 1)
 
-        nn.init.normal_(self.head_b_delta.weight, mean=0.0, std=1e-3)
+        # Start close to, but not effectively locked at, the uniform solution.
+        # With the softmax temperature below, 1e-2 leaves enough asymmetry for
+        # the bandwidth head to receive a useful learning signal immediately.
+        nn.init.normal_(self.head_b_delta.weight, mean=0.0, std=1e-2)
         if self.head_b_delta.bias is not None:
             nn.init.constant_(self.head_b_delta.bias, 0.0)
 
@@ -72,59 +76,33 @@ class Net(nn.Module):
         global_context = global_context.unsqueeze(1).expand(-1, self.K, -1)
 
         combined = torch.cat([local_feats, global_context], dim=2)
-
-        learned_delta = self.head_b_delta(combined).squeeze(2)
-        base_logits = initial_bandwidth_logits(
-            D_k=D_k,
-            H_k_mag=H_k_mag,
-            beta=beta,
-            tr_power=tr_power,
-            B_total=self.B_total,
-        )
-
-        logits_b = base_logits + learned_delta
+        
+        logits_b = self.head_b_delta(combined).squeeze(2)
 
         b_k = softmax_with_floor_and_temp(
             logits_b,
             self.B_total,
             min_share=1e-5,
-            temp=1.0,
+            temp=0.3,
         )
 
-        A = ProcessTime.t_comp(x, b_k, None) + ProcessTime.t_tr(x, b_k, None)
+        if self.uniform_f_dt:
+            f_dt_k = allocate_uniform_f_dt(
+                D_k=D_k,
+                C_DT_total=self.C_DT_total,
+            )
+        else:
+            A = ProcessTime.t_comp(x, b_k, None) + ProcessTime.t_tr(x, b_k, None)
 
-        f_dt_k = allocate_f_from_A(
-            A=A,
-            D_k=D_k,
-            C_DT_total=self.C_DT_total,
-        )
+            f_dt_k = allocate_f_from_A(
+                A=A,
+                D_k=D_k,
+                C_DT_total=self.C_DT_total,
+            )
 
         return b_k, f_dt_k
 
 
-def initial_bandwidth_logits(D_k, H_k_mag, beta, tr_power, B_total):
-    K = D_k.shape[1]
-
-    equal_b = torch.as_tensor(
-        B_total / K,
-        dtype=D_k.dtype,
-        device=D_k.device,
-    )
-
-    beta = torch.clamp(beta, min=1.0)
-    snr_equal = (H_k_mag**2 * tr_power) / (c.N0 * equal_b + 1e-16)
-    snr_equal = torch.clamp(snr_equal, min=0.0, max=1e30)
-
-    rate_equal = equal_b * torch.log2(1.0 + snr_equal)
-    rate_equal = torch.clamp(rate_equal, min=1e-12)
-
-    transmission_need = D_k / (beta * rate_equal)
-    logits = torch.log(torch.clamp(transmission_need, min=1e-12))
-
-    logits_mean = torch.mean(logits, dim=1, keepdim=True)
-    logits_std = torch.std(logits, dim=1, keepdim=True)
-
-    return (logits - logits_mean) / (logits_std + 1e-6)
 
 
 def allocate_f_from_A(A, D_k, C_DT_total, num_iter=20):
@@ -151,6 +129,10 @@ def allocate_f_from_A(A, D_k, C_DT_total, num_iter=20):
     f = C_DT_total * f / (torch.sum(f, dim=1, keepdim=True) + 1e-12)
 
     return f
+
+
+def allocate_uniform_f_dt(D_k, C_DT_total):
+    return torch.full_like(D_k, C_DT_total / D_k.shape[1])
 
 
 def softmax_with_floor_and_temp(logits, total_budget, min_share=1e-6, temp=0.1):

@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 import torch
 from numpy.typing import NDArray
-from pathlib import Path
 import ProcessTime
 import AnalyzeUtil
 import cvxpy as cp
@@ -10,9 +9,9 @@ import numpy as np
 import Constants as c
 from DataUtil import generate_data_loader
 from TrainingUtil import unsupervised_loss, train, set_seed
-from torch.optim import Adam, lr_scheduler
+from torch.optim import AdamW, lr_scheduler
 from EarlyStopping import EarlyStopping
-from NNSolver import Net
+from NNSolver import Net, allocate_f_from_A, allocate_uniform_f_dt
 import time
 
 
@@ -97,20 +96,21 @@ class Problem:
 
     def train_new_model(
         self,
-        checkpoint_path="model/checkpoint.pth",
         print_losses=True,
         n_epoch=100,
         train_length=int(1e4),
+        uniform_f_dt=False,
     ):
 
         set_seed()
 
         model = Net(
-            self.K, self.total_bandwidth, c.total_compute_power, self.beta_max
+            self.K,
+            self.total_bandwidth,
+            c.total_compute_power,
+            self.beta_max,
+            uniform_f_dt=uniform_f_dt,
         ).to(self.device)
-
-        checkpoint_path = str(checkpoint_path)
-        Path(checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
 
         train_loader, test_loader = generate_data_loader(
             train_length,
@@ -124,13 +124,29 @@ class Problem:
             beta_max=self.beta_max,
         )
 
-        optimizer = Adam(model.parameters(), lr=1e-3)
+        optimizer = AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
 
-        scheduler = lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode="min", factor=0.5, patience=2
+        warmup_epochs = max(1, n_epoch // 20)
+        decay_epochs = max(1, n_epoch - warmup_epochs)
+        scheduler = lr_scheduler.SequentialLR(
+            optimizer,
+            schedulers=[
+                lr_scheduler.LinearLR(
+                    optimizer,
+                    start_factor=0.1,
+                    end_factor=1.0,
+                    total_iters=warmup_epochs,
+                ),
+                lr_scheduler.CosineAnnealingLR(
+                    optimizer,
+                    T_max=decay_epochs,
+                    eta_min=1e-6,
+                ),
+            ],
+            milestones=[warmup_epochs],
         )
 
-        early_stopper = EarlyStopping(patience=4, min_delta=0.1, path=checkpoint_path)
+        early_stopper = EarlyStopping(patience=30, min_delta=1e-9, relative=True)
 
         loss_fn = unsupervised_loss
 
@@ -144,7 +160,6 @@ class Problem:
             loss_fn,
             self.device,
             n_epoch=n_epoch,
-            path_to_weight=checkpoint_path,
             print_losses=print_losses,
         )
 
@@ -209,9 +224,18 @@ class Problem:
     def leader_optimization(self, model):
 
         if model == "cvx":
-            self.leader_optimization_cvx()
+            return self.leader_optimization_cvx()
+
+        if model == "uniform":
+            self.leader_optimization_uniform()
             return
 
+        if model == "uniform_f_dt":
+            self.leader_optimization_uniform_f_dt()
+            return
+
+        t_start_leader = time.perf_counter()
+        
         X = self.to_X()
 
         device = next(model.parameters()).device
@@ -223,9 +247,52 @@ class Problem:
 
         self.b = b.detach().cpu().numpy().reshape(self.N, self.K)
         self.f = f.detach().cpu().numpy().reshape(self.N, self.K)
+        
+        t_end_leader = time.perf_counter()
+        leader_time_used = t_end_leader - t_start_leader
+        
+        return leader_time_used / self.N
+
+    def leader_optimization_uniform(self):
+        X = torch.tensor(self.to_X(), dtype=torch.float32, device=self.device)
+        b = torch.full(
+            (self.N, self.K),
+            self.total_bandwidth / self.K,
+            dtype=torch.float32,
+            device=self.device,
+        )
+
+        A = ProcessTime.t_comp(X, b, None) + ProcessTime.t_tr(X, b, None)
+        D_k = X[:, : self.K]
+        f = allocate_f_from_A(
+            A=A,
+            D_k=D_k,
+            C_DT_total=c.total_compute_power,
+        )
+
+        self.b = b.detach().cpu().numpy().reshape(self.N, self.K)
+        self.f = f.detach().cpu().numpy().reshape(self.N, self.K)
+
+    def leader_optimization_uniform_f_dt(self):
+        X = torch.tensor(self.to_X(), dtype=torch.float32, device=self.device)
+        b = torch.full(
+            (self.N, self.K),
+            self.total_bandwidth / self.K,
+            dtype=torch.float32,
+            device=self.device,
+        )
+        D_k = X[:, : self.K]
+        f = allocate_uniform_f_dt(
+            D_k=D_k,
+            C_DT_total=c.total_compute_power,
+        )
+
+        self.b = b.detach().cpu().numpy().reshape(self.N, self.K)
+        self.f = f.detach().cpu().numpy().reshape(self.N, self.K)
 
     def leader_optimization_cvx(self, verbose=False):
         eps = 1e-8
+        solver_time_used = 0.0
 
         beta_all = np.clip(self.beta(), 1.0, self.beta_max)
 
@@ -293,6 +360,7 @@ class Problem:
             problem = cp.Problem(cp.Minimize(T), constraints)
 
             try:
+                t_start_solve = time.perf_counter()
                 problem.solve(
                     solver=cp.MOSEK,
                     verbose=verbose,
@@ -303,6 +371,11 @@ class Problem:
                         "MSK_IPAR_INTPNT_MAX_ITERATIONS": 200,
                     },
                 )
+                solve_wall_time = time.perf_counter() - t_start_solve
+                solve_time = problem.solver_stats.solve_time
+                if solve_time is None:
+                    solve_time = solve_wall_time
+                solver_time_used += solve_time
 
                 if (
                     problem.status in ["optimal", "optimal_inaccurate"]
@@ -328,6 +401,8 @@ class Problem:
             print(
                 f"MOSEK skipped {len(failed_scenarios)} scenario(s): {failed_scenarios}"
             )
+        
+        return solver_time_used / self.N
 
     def follower_optimization(
         self,
@@ -394,10 +469,11 @@ class Problem:
         for it in range(max_iters):
 
             # 1. Leader optimization: update self.b and self.f
-            t_start_leader = time.perf_counter()
-            self.leader_optimization(model)
-            t_end_leader = time.perf_counter()
-            self.leader_time_used += [t_start_leader - t_end_leader]
+            
+            leader_time_used_per_scenario = self.leader_optimization(model)
+            if leader_time_used_per_scenario is not None:
+                self.leader_time_used.append(leader_time_used_per_scenario)
+            
 
             # 2. Follower optimization: update self.lam
             self.follower_optimization(num_iters=follower_iters)
@@ -412,16 +488,6 @@ class Problem:
                 diff = np.inf
             else:
                 diff = abs(obj - prev_obj)
-
-            history.append(
-                {
-                    "iter": it,
-                    "objective": obj,
-                    "diff": diff,
-                    "max_time_mean": np.mean(max_time),
-                    "max_time_max": np.max(max_time),
-                }
-            )
 
             if diff <= tol:
                 break
@@ -441,6 +507,10 @@ class Problem:
     def print_avg(self):
         X, b, f = self._torch_state()
         AnalyzeUtil.print_avg(X, b, f)
+        
+    def print_one_sample(self, sample_idx):
+        X, b, f = self._torch_state()
+        AnalyzeUtil.print_avg(X[sample_idx, :].reshape(1, -1), b[sample_idx, :].reshape(1, -1), f[sample_idx, :].reshape(1, -1))
 
     def plot(self):
         X, b, f = self._torch_state()
@@ -455,5 +525,4 @@ class Problem:
         return self.leader_time_used
 
     def get_t_total_max(self):
-        t_total = self.to_df()["$t_{total}$"]
-        return t_total.max()
+        return np.mean(self.max_completion_time(device=self.device))
