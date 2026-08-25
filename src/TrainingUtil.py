@@ -7,15 +7,10 @@ import random
 def unsupervised_loss(X, b, f):
     T_total = t_total(X, b, f)
 
-    T_mean = torch.mean(T_total, dim=1, keepdim=True)
-    T_norm = T_total / (T_mean + 1e-12)
-
     alpha = 5.0
-    smooth_max_norm = (1 / alpha) * torch.logsumexp(alpha * T_norm, dim=1)
-    
-    loss_norm = smooth_max_norm
+    smooth_max_norm = (1 / alpha) * torch.logsumexp(alpha * T_total, dim=1)
 
-    return torch.mean(T_mean.squeeze(1) * loss_norm)
+    return torch.mean(smooth_max_norm)
 
 
 def train_loop(
@@ -33,13 +28,11 @@ def train_loop(
 
         optimizer.zero_grad()
         X = X[0].to(device)
-        # 2. Forward Pass
-        # The model predicts optimal Bandwidth, Compute, and Compression based on the scenario
-        b_pred, f_pred = model(X)  # Model takes |H_k|^2 as input
-        # 3. Physics Calculation for Loss
+        
+        b_pred, f_pred = model(X)
+        
         loss = loss_fn(X, b_pred, f_pred)
 
-        # 5. Backward Pass
         loss.backward()
         optimizer.step()
 

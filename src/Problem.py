@@ -49,8 +49,12 @@ class Problem:
         self.total_bandwidth = total_bandwidth
 
         # Decision variables, shape: (N, K)
-        self.b = np.ones((self.N, self.K), dtype=float)
-        self.f = np.ones((self.N, self.K), dtype=float)
+        self.b = np.full(
+            (self.N, self.K), self.total_bandwidth / self.K, dtype=float
+        )
+        self.f = np.full(
+            (self.N, self.K), c.total_compute_power / self.K, dtype=float
+        )
 
         # Dual variables, shape: (N, K, 2)
         # lam[:, :, 0] = lambda_1
@@ -68,6 +72,7 @@ class Problem:
 
         self.total_time_used = 0
         self.leader_time_used = []
+        self.cvx_success_mask = np.ones(self.N, dtype=bool)
 
     def _as_2d(self, x):
         x = np.asarray(x, dtype=float)
@@ -397,6 +402,12 @@ class Problem:
         self.b = b_result
         self.f = f_result
 
+        iteration_success_mask = np.ones(self.N, dtype=bool)
+        iteration_success_mask[failed_scenarios] = False
+        # A scenario is safe for comparison only if every CVX leader step
+        # completed successfully during the optimization.
+        self.cvx_success_mask &= iteration_success_mask
+
         if len(failed_scenarios) > 0:
             print(
                 f"MOSEK skipped {len(failed_scenarios)} scenario(s): {failed_scenarios}"
@@ -524,5 +535,16 @@ class Problem:
     def get_leader_time_used(self) -> list:
         return self.leader_time_used
 
-    def get_t_total_max(self):
-        return np.mean(self.max_completion_time(device=self.device))
+    def get_t_total_max(self, scenario_mask=None):
+        completion_times = self.max_completion_time(device=self.device)
+        if scenario_mask is not None:
+            scenario_mask = np.asarray(scenario_mask, dtype=bool)
+            if scenario_mask.shape != (self.N,):
+                raise ValueError(f"scenario_mask must have shape ({self.N},)")
+            if not np.any(scenario_mask):
+                raise ValueError("scenario_mask excludes every scenario")
+            completion_times = completion_times[scenario_mask]
+        return np.mean(completion_times)
+
+    def get_cvx_success_mask(self):
+        return self.cvx_success_mask.copy()

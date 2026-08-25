@@ -109,7 +109,7 @@ def allocate_f_from_A(A, D_k, C_DT_total, num_iter=20):
     w = D_k * c.dt_compute_complexity
 
     low = torch.max(A, dim=1, keepdim=True).values + 1e-6
-    high = (low + torch.sum(w, dim=1, keepdim=True) / C_DT_total) * 2
+    high = low + torch.sum(w, dim=1, keepdim=True) / C_DT_total
 
     for _ in range(num_iter):
         mid = 0.5 * (low + high)
@@ -137,9 +137,6 @@ def allocate_uniform_f_dt(D_k, C_DT_total):
 
 def softmax_with_floor_and_temp(logits, total_budget, min_share=1e-6, temp=0.1):
     K = logits.shape[1]
-
-    # Make sure the floor is valid for any K
-    min_share = min(min_share, 0.1 / K)
 
     logits = torch.clamp(logits, -30.0, 30.0)
     raw = torch.softmax(logits / temp, dim=1)
