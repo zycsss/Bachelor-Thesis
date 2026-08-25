@@ -30,10 +30,7 @@ class Net(nn.Module):
         )
 
         self.head_b_delta = nn.Linear(combined_feat, 1)
-
-        # Start close to, but not effectively locked at, the uniform solution.
-        # With the softmax temperature below, 1e-2 leaves enough asymmetry for
-        # the bandwidth head to receive a useful learning signal immediately.
+        
         nn.init.normal_(self.head_b_delta.weight, mean=0.0, std=1e-2)
         if self.head_b_delta.bias is not None:
             nn.init.constant_(self.head_b_delta.bias, 0.0)
